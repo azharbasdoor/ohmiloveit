@@ -1,0 +1,143 @@
+---
+// src/components/MusicPlayer.astro
+// Komponen pemutar musik latar untuk seksi blog.
+// - Default: mati (harus diklik user, karena browser memblokir autoplay)
+// - Preferensi play/pause diingat lewat localStorage
+// - Posisi waktu diingat lewat sessionStorage
+// - transition:persist membuat audio TIDAK di-recreate saat navigasi SPA
+---
+
+<div
+  id="music-player"
+  class="music-player"
+  transition:persist="music-player"
+>
+  <audio
+    id="bg-music"
+    src="/music/ambient.mp3"
+    loop
+    preload="metadata"
+  ></audio>
+
+  <button
+    id="music-toggle"
+    class="music-toggle"
+    type="button"
+    aria-label="Putar atau hentikan musik latar"
+    aria-pressed="false"
+  >
+    <!-- Ikon play -->
+    <svg class="icon-play" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M8 5v14l11-7z" fill="currentColor" />
+    </svg>
+    <!-- Ikon pause -->
+    <svg class="icon-pause" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor" />
+    </svg>
+  </button>
+</div>
+
+<style>
+  .music-player {
+    position: fixed;
+    bottom: 1.25rem;
+    right: 1.25rem;
+    z-index: 9999;
+  }
+
+  .music-toggle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(20, 20, 20, 0.75);
+    color: #fff;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, background 0.2s ease;
+  }
+
+  .music-toggle:hover {
+    transform: scale(1.06);
+    background: rgba(20, 20, 20, 0.9);
+  }
+
+  .music-toggle:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+  }
+
+  .music-toggle .icon-pause { display: none; }
+  .music-toggle[aria-pressed="true"] .icon-play { display: none; }
+  .music-toggle[aria-pressed="true"] .icon-pause { display: block; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .music-toggle { transition: none; }
+  }
+</style>
+
+<script>
+  const STORAGE_KEY = 'music-enabled';
+  const TIME_KEY = 'music-time';
+
+  function initMusicPlayer() {
+    const audio = document.getElementById('bg-music') as HTMLAudioElement | null;
+    const btn = document.getElementById('music-toggle') as HTMLButtonElement | null;
+
+    // Guard: jangan init dua kali (penting dengan View Transitions)
+    if (!audio || !btn || audio.dataset.initialized === 'true') return;
+    audio.dataset.initialized = 'true';
+
+    // Pulihkan posisi waktu dari sesi sebelumnya (jika ada)
+    const savedTime = sessionStorage.getItem(TIME_KEY);
+    if (savedTime) {
+      audio.currentTime = parseFloat(savedTime) || 0;
+    }
+
+    // Pulihkan preferensi user
+    const enabled = localStorage.getItem(STORAGE_KEY) === 'true';
+    btn.setAttribute('aria-pressed', String(enabled));
+
+    if (enabled) {
+      // Coba lanjutkan — jika diblokir browser, jatuhkan ke non-aktif
+      audio.play().catch(() => {
+        btn.setAttribute('aria-pressed', 'false');
+        localStorage.setItem(STORAGE_KEY, 'false');
+      });
+    }
+
+    // Toggle play/pause
+    btn.addEventListener('click', () => {
+      if (audio.paused) {
+        audio.play()
+          .then(() => {
+            localStorage.setItem(STORAGE_KEY, 'true');
+            btn.setAttribute('aria-pressed', 'true');
+          })
+          .catch((err) => console.warn('Gagal memutar audio:', err));
+      } else {
+        audio.pause();
+        localStorage.setItem(STORAGE_KEY, 'false');
+        btn.setAttribute('aria-pressed', 'false');
+      }
+    });
+
+    // Simpan posisi waktu berkala
+    setInterval(() => {
+      if (!audio.paused) {
+        sessionStorage.setItem(TIME_KEY, String(audio.currentTime));
+      }
+    }, 1000);
+
+    // Simpan posisi waktu saat halaman ditutup/reload
+    window.addEventListener('beforeunload', () => {
+      sessionStorage.setItem(TIME_KEY, String(audio.currentTime));
+    });
+  }
+
+  // Dijalankan saat halaman pertama dibuka, dan saat navigasi (View Transitions)
+  document.addEventListener('astro:page-load', initMusicPlayer);
+</script>
