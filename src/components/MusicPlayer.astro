@@ -1,68 +1,71 @@
----
-// Komponen musik latar untuk seksi blog.
-// Strategi: coba play() langsung; jika diblokir browser, tunggu interaksi pertama user.
----
-
-<audio
-  id="bg-music"
-  src="/music/ambient.mp3"
-  loop
-  preload="auto"
-  transition:persist="bg-music"
-></audio>
-
 <script>
   const TIME_KEY = 'music-time';
 
-  function startMusic() {
+  async function startMusic() {
     const audio = document.getElementById('bg-music') as HTMLAudioElement | null;
     if (!audio) return;
 
-    // Guard: jangan init dua kali saat navigasi SPA
-    if (audio.dataset.initialized === 'true') {
-      if (audio.paused) {
-        audio.play().catch(() => {});
+    // Pulihkan posisi waktu (hanya sekali per sesi elemen)
+    if (!audio.dataset.timeRestored) {
+      const savedTime = sessionStorage.getItem(TIME_KEY);
+      if (savedTime) {
+        audio.currentTime = parseFloat(savedTime) || 0;
       }
-      return;
-    }
-    audio.dataset.initialized = 'true';
-
-    // Pulihkan posisi waktu terakhir
-    const savedTime = sessionStorage.getItem(TIME_KEY);
-    if (savedTime) {
-      audio.currentTime = parseFloat(savedTime) || 0;
+      audio.dataset.timeRestored = 'true';
     }
 
-    // Coba play langsung
-    audio.play().catch(() => {
-      // Gagal → pasang listener sekali pakai untuk interaksi pertama
-      const tryPlay = () => {
-        audio.play().catch(() => {});
-        cleanup();
-      };
-      const cleanup = () => {
-        document.removeEventListener('click', tryPlay);
-        document.removeEventListener('touchstart', tryPlay);
-        document.removeEventListener('keydown', tryPlay);
-        document.removeEventListener('scroll', tryPlay);
-      };
+    // Kalau sudah main, tidak perlu apa-apa
+    if (!audio.paused) return;
 
-      document.addEventListener('click', tryPlay, { once: true, passive: true });
-      document.addEventListener('touchstart', tryPlay, { once: true, passive: true });
-      document.addEventListener('keydown', tryPlay, { once: true, passive: true });
-      document.addEventListener('scroll', tryPlay, { once: true, passive: true });
-    });
+    // Tunggu audio siap diputar (readyState >= 2 = HAVE_CURRENT_DATA)
+    async function waitReady(): Promise<void> {
+      if (audio.readyState >= 2) return;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          audio.removeEventListener('loadedmetadata', done);
+          resolve();
+        };
+        audio.addEventListener('loadedmetadata', done, { once: true });
+        // Jangan tunggu selamanya
+        setTimeout(done, 3000);
+      });
+    }
 
-    // Simpan posisi waktu berkala
-    setInterval(() => {
-      if (!audio.paused) {
-        sessionStorage.setItem(TIME_KEY, String(audio.currentTime));
+    async function attemptPlay(): Promise<boolean> {
+      try {
+        await waitReady();
+        await audio.play();
+        return true;
+      } catch {
+        return false;
       }
-    }, 1000);
+    }
 
-    window.addEventListener('beforeunload', () => {
-      sessionStorage.setItem(TIME_KEY, String(audio.currentTime));
-    });
+    // Percobaan pertama
+    const ok = await attemptPlay();
+    if (ok) return;
+
+    // Gagal → pasang fallback interaksi (dan biarkan menempel sampai berhasil)
+    if (audio.dataset.fallbackAttached === 'true') return;
+    audio.dataset.fallbackAttached = 'true';
+
+    const onGesture = () => {
+      audio.play()
+        .then(() => {
+          // Berhasil → lepaskan semua listener
+          document.removeEventListener('click', onGesture);
+          document.removeEventListener('touchstart', onGesture);
+          document.removeEventListener('scroll', onGesture);
+          document.removeEventListener('keydown', onGesture);
+          audio.dataset.fallbackAttached = 'false';
+        })
+        .catch(() => { /* biarkan, akan dicoba lagi di gesture berikutnya */ });
+    };
+
+    document.addEventListener('click', onGesture, { passive: true });
+    document.addEventListener('touchstart', onGesture, { passive: true });
+    document.addEventListener('scroll', onGesture, { passive: true });
+    document.addEventListener('keydown', onGesture, { passive: true });
   }
 
   document.addEventListener('astro:page-load', startMusic);
